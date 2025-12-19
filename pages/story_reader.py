@@ -1,14 +1,25 @@
 import streamlit as st
 from utils.tts import speak
-from utils.stt import transcribe_audio
-from audiorecorder import audiorecorder
+from streamlit_webrtc import webrtc_streamer, AudioProcessorBase
+import numpy as np
+import queue
 import difflib
-from pydub import AudioSegment
+import tempfile
+import whisper
+import soundfile as sf
 
-AudioSegment.converter = r"C:\Users\User\Downloads\ffmpeg\ffmpeg\bin\ffmpeg.exe"
-AudioSegment.ffprobe = r"C:\Users\User\Downloads\ffmpeg\ffmpeg\bin\ffprobe.exe"
+# ---------- AUDIO PROCESSOR ----------
+class AudioProcessor(AudioProcessorBase):
+    def __init__(self):
+        self.audio_buffer = queue.Queue()
+
+    def recv_audio(self, frame):
+        audio = frame.to_ndarray()
+        self.audio_buffer.put(audio)
+        return frame
 
 
+# ---------- APP UI ----------
 st.title("📖 Story Reader")
 
 if "story" not in st.session_state:
@@ -21,28 +32,47 @@ with open(f"stories/{st.session_state['story']}", "r") as f:
 st.write(story_text)
 st.divider()
 
-# Read to Me
+# ---------- READ TO ME ----------
 if st.button("🔊 Read to Me"):
     audio_file = speak(story_text)
     st.audio(audio_file)
 
 st.divider()
 
-# I Will Read
+# ---------- I WILL READ ----------
 st.subheader("🎤 I Will Read")
 
-audio = audiorecorder("Start Reading", "Stop Recording")
+ctx = webrtc_streamer(
+    key="speech",
+    audio_processor_factory=AudioProcessor,
+    media_stream_constraints={"audio": True, "video": False},
+)
 
-if len(audio) > 0:
-    st.audio(audio.export().read())
+spoken_text = None  # IMPORTANT safeguard
 
-    with st.spinner("Listening carefully..."):
-        spoken_text = transcribe_audio(audio.export().read())
+if ctx.audio_processor and st.button("Analyze Reading"):
+    st.info("Listening and analyzing...")
 
-    st.subheader("What Lexi heard:")
-    st.write(spoken_text)
+    audio_chunks = []
+    while not ctx.audio_processor.audio_buffer.empty():
+        audio_chunks.append(ctx.audio_processor.audio_buffer.get())
 
-    # Accuracy check
+    if audio_chunks:
+        audio_np = np.concatenate(audio_chunks, axis=0)
+
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            sf.write(f.name, audio_np, 16000)
+            audio_path = f.name
+
+        model = whisper.load_model("tiny")
+        result = model.transcribe(audio_path)
+        spoken_text = result["text"]
+
+        st.subheader("What Lexi heard:")
+        st.write(spoken_text)
+
+# ---------- ACCURACY ----------
+if spoken_text:
     original_words = story_text.lower().split()
     spoken_words = spoken_text.lower().split()
 
@@ -51,8 +81,8 @@ if len(audio) > 0:
 
     st.metric("Reading Accuracy", f"{accuracy:.1f}%")
 
-
-    st.divider()
+# ---------- COMPREHENSION ----------
+st.divider()
 st.subheader("🧠 Check Your Understanding")
 
 questions = [
@@ -74,7 +104,6 @@ questions = [
 ]
 
 score = 0
-
 for i, item in enumerate(questions):
     user_ans = st.radio(item["q"], item["options"], key=i)
     if user_ans == item["answer"]:
@@ -90,5 +119,4 @@ if st.button("Submit Answers"):
         st.write("👍 Good job! Let’s keep practicing.")
     else:
         st.write("📖 Let’s read the story again together.")
-
 
