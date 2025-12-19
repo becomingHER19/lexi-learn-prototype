@@ -41,29 +41,40 @@ st.divider()
 
 # ---------- I WILL READ ----------
 st.subheader("🎤 I Will Read")
+st.write("Click start, read the story aloud, then click **Stop Reading**.")
 
+# Start mic stream
 ctx = webrtc_streamer(
     key="speech",
     audio_processor_factory=AudioProcessor,
     media_stream_constraints={"audio": True, "video": False},
 )
 
-spoken_text = None  # IMPORTANT safeguard
+# Stop button
+if st.button("Stop Reading"):
+    st.session_state.recording_done = True
 
-if ctx.audio_processor and st.button("Analyze Reading"):
-    st.info("Listening and analyzing...")
+spoken_text = None
+
+# Analyze ONLY after stop
+if ctx.audio_processor and st.session_state.recording_done:
+    st.info("Analyzing your reading...")
 
     audio_chunks = []
     while not ctx.audio_processor.audio_buffer.empty():
         audio_chunks.append(ctx.audio_processor.audio_buffer.get())
 
-    if audio_chunks:
+    if len(audio_chunks) < 3:
+        st.warning("Please read a little longer before stopping.")
+    else:
         audio_np = np.concatenate(audio_chunks, axis=0)
 
+        # Save audio
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
             sf.write(f.name, audio_np, 16000)
             audio_path = f.name
 
+        # Transcribe
         model = whisper.load_model("tiny")
         result = model.transcribe(audio_path)
         spoken_text = result["text"]
@@ -71,7 +82,7 @@ if ctx.audio_processor and st.button("Analyze Reading"):
         st.subheader("What Lexi heard:")
         st.write(spoken_text)
 
-# ---------- ACCURACY ----------
+ #accuracy
 if spoken_text:
     original_words = story_text.lower().split()
     spoken_words = spoken_text.lower().split()
@@ -80,6 +91,14 @@ if spoken_text:
     accuracy = matcher.ratio() * 100
 
     st.metric("Reading Accuracy", f"{accuracy:.1f}%")
+
+    missed_words = [w for w in original_words if w not in spoken_words]
+
+    if missed_words:
+        st.write("❌ Missed words:")
+        st.write(", ".join(missed_words[:10]))
+    else:
+        st.write("✅ No missed words detected")
 
 # ---------- COMPREHENSION ----------
 st.divider()
