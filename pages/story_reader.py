@@ -8,6 +8,15 @@ import tempfile
 import whisper
 import soundfile as sf
 
+# ---------- SESSION STATE ----------
+if "recording_done" not in st.session_state:
+    st.session_state.recording_done = False
+
+# ---------- LOAD WHISPER ONCE ----------
+@st.cache_resource
+def load_whisper():
+    return whisper.load_model("tiny")
+
 # ---------- AUDIO PROCESSOR ----------
 class AudioProcessor(AudioProcessorBase):
     def __init__(self):
@@ -17,7 +26,6 @@ class AudioProcessor(AudioProcessorBase):
         audio = frame.to_ndarray()
         self.audio_buffer.put(audio)
         return frame
-
 
 # ---------- APP UI ----------
 st.title("📖 Story Reader")
@@ -43,20 +51,18 @@ st.divider()
 st.subheader("🎤 I Will Read")
 st.write("Click start, read the story aloud, then click **Stop Reading**.")
 
-# Start mic stream
 ctx = webrtc_streamer(
     key="speech",
     audio_processor_factory=AudioProcessor,
     media_stream_constraints={"audio": True, "video": False},
 )
 
-# Stop button
 if st.button("Stop Reading"):
     st.session_state.recording_done = True
 
 spoken_text = None
 
-# Analyze ONLY after stop
+# ---------- ANALYZE AFTER STOP ----------
 if ctx.audio_processor and st.session_state.recording_done:
     st.info("Analyzing your reading...")
 
@@ -65,24 +71,25 @@ if ctx.audio_processor and st.session_state.recording_done:
         audio_chunks.append(ctx.audio_processor.audio_buffer.get())
 
     if len(audio_chunks) < 3:
-        st.warning("Please read a little longer before stopping.")
+        st.warning("Please read a little longer.")
     else:
         audio_np = np.concatenate(audio_chunks, axis=0)
 
-        # Save audio
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
             sf.write(f.name, audio_np, 16000)
             audio_path = f.name
 
-        # Transcribe
-        model = whisper.load_model("tiny")
+        model = load_whisper()
         result = model.transcribe(audio_path)
         spoken_text = result["text"]
 
         st.subheader("What Lexi heard:")
         st.write(spoken_text)
 
- #accuracy
+    # reset for next attempt
+    st.session_state.recording_done = False
+
+# ---------- ACCURACY + MISSED WORDS ----------
 if spoken_text:
     original_words = story_text.lower().split()
     spoken_words = spoken_text.lower().split()
@@ -138,4 +145,3 @@ if st.button("Submit Answers"):
         st.write("👍 Good job! Let’s keep practicing.")
     else:
         st.write("📖 Let’s read the story again together.")
-
