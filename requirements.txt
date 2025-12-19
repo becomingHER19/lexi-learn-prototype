@@ -1,8 +1,7 @@
 streamlit
-streamlit-webrtc
-gtts
+streamlit-audiorecorder
 openai-whisper
-numpy
+torch
 soundfile
-av
-
+numpy
+pydub
