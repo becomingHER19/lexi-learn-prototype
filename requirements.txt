@@ -2,4 +2,4 @@ streamlit
 gtts
 streamlit-audiorecorder
 openai-whisper
-pydub
+pydub==0.25.1
